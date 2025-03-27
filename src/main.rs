@@ -1,20 +1,54 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use anyhow::Result;
 
-/// A CLI tool template
+mod commands;
+mod config;
+
+/// A CLI tool for Ethereum Safe operations
 #[derive(Parser)]
 #[command(
     name = "vito",
     author, 
     version, 
-    about = "A powerful CLI tool for managing your projects", 
-    long_about = "A feature-rich command-line interface tool designed to help you manage your projects more efficiently."
+    about = "A powerful CLI tool for managing Safe wallet transactions", 
+    long_about = "A feature-rich command-line interface tool designed to help you interact with Ethereum Safe wallets."
 )]
 struct Cli {
-    // Add your command line arguments here
+    #[command(subcommand)]
+    command: Commands,
 }
 
-fn main() -> Result<()> {
-    let _cli = Cli::parse();
+#[derive(Subcommand)]
+enum Commands {
+    /// Fetch transaction data from Safe transaction pool
+    Tx {
+        /// Ethereum Safe wallet address (0x...)
+        #[arg(short, long)]
+        safe: String,
+
+        /// Provider RPC URL (http:// or https://) - Optional, defaults to Ethereum mainnet
+        #[arg(short, long)]
+        rpc: Option<String>,
+
+        /// Transaction hash (0x...) - Optional
+        #[arg(short = 't', long)]
+        hash: Option<String>,
+
+        /// Custom Safe transaction pool address (0x...) - Optional
+        #[arg(long)]
+        tx_pool: Option<String>,
+    },
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    
+    match cli.command {
+        Commands::Tx { safe, rpc, hash, tx_pool } => {
+            commands::tx::execute(safe, rpc, hash, tx_pool).await?;
+        }
+    }
+    
     Ok(())
 }
