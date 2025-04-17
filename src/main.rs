@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
+use std::env;
 
 mod commands;
 mod config;
@@ -14,22 +15,18 @@ mod config;
     long_about = "A feature-rich command-line interface tool designed to help you interact with Ethereum Safe wallets."
 )]
 struct Cli {
+    /// Ethereum Safe wallet address (0x...)
+    #[arg(short, long)]
+    safe: Option<String>,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
     /// Fetch transaction data from Safe transaction pool
     Tx {
-        /// Ethereum Safe wallet address (0x...)
-        #[arg(short, long)]
-        safe: String,
-
-        /// Provider RPC URL (http:// or https://) - Optional, defaults to Ethereum mainnet
-        #[arg(short, long)]
-        rpc: Option<String>,
-
         /// Transaction hash (0x...) - Optional
         #[arg(short = 't', long)]
         hash: Option<String>,
@@ -38,15 +35,30 @@ enum Commands {
         #[arg(long)]
         tx_pool: Option<String>,
     },
+    
+    /// Start interactive shell mode
+    Shell,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     
+    // Get RPC URL from environment variables
+    let rpc = env::var("RPC_URL").ok();
+    
     match cli.command {
-        Commands::Tx { safe, rpc, hash, tx_pool } => {
-            commands::tx::execute(safe, rpc, hash, tx_pool).await?;
+        Some(Commands::Tx { hash, tx_pool }) => {
+            // Pass the safe address from the top-level CLI
+            commands::tx::execute(cli.safe.clone(), rpc, hash, tx_pool).await?;
+        },
+        Some(Commands::Shell) => {
+            // Pass the safe address to the shell
+            commands::shell::execute(cli.safe.clone()).await?;
+        },
+        None => {
+            // No command provided, start interactive mode by default
+            commands::shell::execute(cli.safe).await?;
         }
     }
     
