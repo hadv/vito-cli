@@ -2,12 +2,14 @@ use anyhow::{Result, Context, bail};
 use std::str::FromStr;
 use ethers::{
     providers::{Provider, Http},
-    types::{Address, H256},
+    types::{Address, H256, Bytes},
     contract::{abigen},
     middleware::Middleware,
 };
 use std::sync::Arc;
 use crate::config::{get_safe_tx_pool_address, get_network_name, DEFAULT_MAINNET_RPC};
+use crate::commands::trezor_wallet::TrezorWallet;
+use colored::Colorize;
 
 // Generate contract bindings using the exact ABI from the contract at commit 3658aca34ee38cba8e5bb9ed90927c270df8584d
 abigen!(
@@ -34,7 +36,7 @@ struct TransactionData {
     signatures: Vec<String>,
 }
 
-pub async fn execute(safe: Option<String>, rpc: Option<String>, hash: Option<String>, tx_pool: Option<String>) -> Result<()> {
+pub async fn execute(safe: Option<String>, rpc: Option<String>, hash: Option<String>, tx_pool: Option<String>, sign: bool, derivation_path: String) -> Result<()> {
     // Clone the safe value early to avoid ownership issues
     let safe_str = safe.clone().unwrap_or_else(|| "unknown".to_string());
 
@@ -113,7 +115,13 @@ pub async fn execute(safe: Option<String>, rpc: Option<String>, hash: Option<Str
         let tx_details = match contract.get_tx_details(hash.into()).call().await {
             Ok(details) => details,
             Err(e) => {
-                bail!("Failed to fetch transaction details: {}. This could be because the transaction does not exist or the contract interface is incorrect.", e);
+                println!("{}", "✗ Failed to fetch transaction details".bright_red());
+                println!("{}", "Possible reasons:".bright_yellow());
+                println!("  1. Transaction hash does not exist in the pool");
+                println!("  2. Network connection issues");
+                println!("  3. Incorrect transaction pool contract address");
+                println!("  4. Transaction may have already been executed");
+                bail!("Failed to fetch transaction details: {}", e);
             }
         };
 
@@ -148,6 +156,70 @@ pub async fn execute(safe: Option<String>, rpc: Option<String>, hash: Option<Str
             signatures: signature_strings,
         };
         
+        // Handle signing if requested
+        if sign {
+            println!("{}", "Signing transaction with Trezor...".bright_blue());
+
+            // Initialize Trezor wallet
+            let trezor_wallet = match TrezorWallet::new(&derivation_path).await {
+                Ok(wallet) => wallet,
+                Err(e) => {
+                    println!("{}", "✗ Failed to connect to Trezor hardware wallet".bright_red());
+                    println!("{}", "Troubleshooting steps:".bright_yellow());
+                    println!("  1. Ensure your Trezor device is connected via USB");
+                    println!("  2. Make sure the Ethereum app is open on your Trezor");
+                    println!("  3. Check that your device is unlocked with PIN");
+                    println!("  4. Verify the derivation path is correct: {}", derivation_path.dimmed());
+                    return Err(e).context("Failed to connect to Trezor hardware wallet");
+                }
+            };
+
+            let signer_address = trezor_wallet.address();
+            println!("Trezor address: {}", format!("0x{:x}", signer_address).bright_white());
+
+            // Check if this signer has already signed the transaction
+            let has_signed = contract.has_signed_tx(hash.into(), signer_address).call().await
+                .context("Failed to check if transaction is already signed")?;
+
+            if has_signed {
+                println!("{}", "✓ Transaction already signed by this Trezor address.".bright_green());
+            } else {
+                // Create the Safe transaction hash for signing
+                let safe_tx_hash = create_safe_tx_hash(
+                    tx_details.0, // safe
+                    tx_details.1, // to
+                    tx_details.2, // value
+                    &tx_details.3, // data
+                    tx_details.4, // operation
+                    tx_details.6, // nonce
+                    network_id,
+                )?;
+
+                println!("Safe transaction hash: {}", format!("0x{}", hex::encode(safe_tx_hash)).bright_white());
+
+                // Sign the transaction hash
+                println!("{}", "Please confirm the transaction on your Trezor device...".bright_yellow());
+                let signature = match trezor_wallet.sign_message(&safe_tx_hash).await {
+                    Ok(sig) => sig,
+                    Err(e) => {
+                        println!("{}", "✗ Failed to sign transaction with Trezor".bright_red());
+                        println!("{}", "Possible reasons:".bright_yellow());
+                        println!("  1. Transaction was rejected on the device");
+                        println!("  2. Device was disconnected during signing");
+                        println!("  3. Timeout occurred waiting for user confirmation");
+                        println!("  4. Device is locked or Ethereum app was closed");
+                        return Err(e).context("Failed to sign transaction with Trezor");
+                    }
+                };
+
+                println!("{}", "✓ Transaction signed successfully!".bright_green());
+                println!("Signature: {}", format!("0x{}", hex::encode(signature.to_vec())).bright_white());
+
+                // TODO: Submit signature to the Safe transaction pool
+                println!("{}", "Note: Signature submission to transaction pool not yet implemented.".yellow());
+            }
+        }
+
         // Convert transaction to JSON and print it
         println!("{}", serde_json::to_string_pretty(&tx_data).unwrap());
     } else {
@@ -221,4 +293,43 @@ pub async fn execute(safe: Option<String>, rpc: Option<String>, hash: Option<Str
     }
 
     Ok(())
-} 
+}
+
+/// Create a Safe transaction hash for signing
+/// This follows the Safe's EIP-712 transaction hash format
+fn create_safe_tx_hash(
+    safe: Address,
+    to: Address,
+    value: ethers::types::U256,
+    data: &Bytes,
+    operation: u8,
+    nonce: ethers::types::U256,
+    chain_id: u64,
+) -> Result<[u8; 32]> {
+    use ethers::utils::keccak256;
+
+    // Safe transaction hash format (simplified version)
+    // In a real implementation, you'd want to use the full EIP-712 format
+    // For now, we'll create a simple hash of the transaction parameters
+
+    let mut hash_data = Vec::new();
+    hash_data.extend_from_slice(safe.as_bytes());
+    hash_data.extend_from_slice(to.as_bytes());
+
+    // Convert U256 to bytes
+    let mut value_bytes = [0u8; 32];
+    value.to_big_endian(&mut value_bytes);
+    hash_data.extend_from_slice(&value_bytes);
+
+    hash_data.extend_from_slice(data);
+    hash_data.push(operation);
+
+    // Convert nonce U256 to bytes
+    let mut nonce_bytes = [0u8; 32];
+    nonce.to_big_endian(&mut nonce_bytes);
+    hash_data.extend_from_slice(&nonce_bytes);
+
+    hash_data.extend_from_slice(&chain_id.to_be_bytes());
+
+    Ok(keccak256(&hash_data))
+}

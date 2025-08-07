@@ -25,6 +25,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Connect to Safe wallet with Trezor hardware wallet
+    Connect {
+        /// HD derivation path for Trezor (e.g. m/44'/60'/0'/0/0)
+        #[arg(long, default_value = "m/44'/60'/0'/0/0")]
+        derivation_path: String,
+    },
     /// Fetch transaction data from Safe transaction pool
     Tx {
         /// Transaction hash (0x...) - Optional
@@ -34,6 +40,14 @@ enum Commands {
         /// Custom Safe transaction pool address (0x...) - Optional
         #[arg(long)]
         tx_pool: Option<String>,
+
+        /// Sign the transaction with Trezor hardware wallet
+        #[arg(long)]
+        sign: bool,
+
+        /// HD derivation path for Trezor when signing (e.g. m/44'/60'/0'/0/0)
+        #[arg(long, default_value = "m/44'/60'/0'/0/0")]
+        derivation_path: String,
     },
     
     /// Start interactive shell mode
@@ -48,9 +62,12 @@ async fn main() -> Result<()> {
     let rpc = env::var("RPC_URL").ok();
     
     match cli.command {
-        Some(Commands::Tx { hash, tx_pool }) => {
+        Some(Commands::Connect { derivation_path }) => {
+            commands::connect::execute(cli.safe.clone(), derivation_path).await?;
+        },
+        Some(Commands::Tx { hash, tx_pool, sign, derivation_path }) => {
             // Pass the safe address from the top-level CLI
-            commands::tx::execute(cli.safe.clone(), rpc, hash, tx_pool).await?;
+            commands::tx::execute(cli.safe.clone(), rpc, hash, tx_pool, sign, derivation_path).await?;
         },
         Some(Commands::Shell) => {
             // Pass the safe address to the shell

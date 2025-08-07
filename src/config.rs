@@ -14,7 +14,7 @@ pub const GNOSIS: u64 = 100;
 
 // Default RPC endpoint for Ethereum mainnet
 // Note: In production, you should use your own API key
-pub const DEFAULT_MAINNET_RPC: &str = "https://eth-mainnet.g.alchemy.com/v2/demo";
+pub const DEFAULT_MAINNET_RPC: &str = "https://eth-mainnet.g.alchemy.com/v2/ADqQafJ_WUhEuuVKqRsqWVKukdF3_1pi";
 
 lazy_static! {
     // Map of network IDs to Safe transaction pool addresses
