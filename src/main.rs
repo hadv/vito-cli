@@ -52,6 +52,9 @@ enum Commands {
     
     /// Start interactive shell mode
     Shell,
+
+    /// Start TUI (Text User Interface) mode
+    Tui,
 }
 
 #[tokio::main]
@@ -72,6 +75,10 @@ async fn main() -> Result<()> {
         Some(Commands::Shell) => {
             // Pass the safe address to the shell
             commands::shell::execute(cli.safe.clone()).await?;
+        },
+        Some(Commands::Tui) => {
+            // Pass the safe address to the TUI
+            commands::tui::execute(cli.safe.clone(), rpc).await?;
         },
         None => {
             // No command provided, start interactive mode by default
