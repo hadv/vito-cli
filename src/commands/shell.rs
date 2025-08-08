@@ -1,9 +1,7 @@
-use std::io::{self, Write};
-use rustyline::{error::ReadlineError, Editor};
-use rustyline::DefaultEditor;
+use rustyline::{error::ReadlineError, DefaultEditor};
 use anyhow::Result;
 use std::env;
-use colored::*;
+use colored::Colorize;
 
 // Helper function to shorten an Ethereum address
 fn shorten_address(address: &str) -> String {
@@ -51,7 +49,7 @@ pub async fn execute(safe: Option<String>) -> Result<()> {
         
         match readline {
             Ok(line) => {
-                rl.add_history_entry(line.as_str());
+                let _ = rl.add_history_entry(line.as_str());
                 
                 // Process the command
                 let command = line.trim();
@@ -70,17 +68,21 @@ pub async fn execute(safe: Option<String>) -> Result<()> {
                     _ => {
                         if command.starts_with("tx ") {
                             if let Some(ref safe) = current_safe {
-                                println!("Transaction command for Safe {}: {}", 
-                                    safe.green(), 
-                                    command[3..].bright_white());
-                                // Here you would parse and execute the tx command
-                                // This is a placeholder - you'll implement the actual parsing logic
+                                let args: Vec<&str> = command[3..].split_whitespace().collect();
+                                handle_tx_command(safe.clone(), args, rpc_url.clone()).await;
+                            } else {
+                                println!("{}", "Error: No Safe address provided. Please restart with --safe <address> option.".red());
+                            }
+                        } else if command.starts_with("connect") {
+                            if let Some(ref safe) = current_safe {
+                                let args: Vec<&str> = command.split_whitespace().collect();
+                                handle_connect_command(safe.clone(), args).await;
                             } else {
                                 println!("{}", "Error: No Safe address provided. Please restart with --safe <address> option.".red());
                             }
                         } else {
-                            println!("{}: {}. Type 'help' for available commands.", 
-                                "Unknown command".red(), 
+                            println!("{}: {}. Type 'help' for available commands.",
+                                "Unknown command".red(),
                                 command.yellow());
                         }
                     }
@@ -106,7 +108,83 @@ pub async fn execute(safe: Option<String>) -> Result<()> {
 
 fn display_help() {
     println!("{}", "Available commands:".bright_green());
-    println!("  {} - Manage transactions (use 'tx --help' for more info)", "tx <args>".yellow());
+    println!("  {} - List pending transactions", "tx".yellow());
+    println!("  {} - Show specific transaction", "tx --hash <hash>".yellow());
+    println!("  {} - Sign transaction with Trezor", "tx --hash <hash> --sign".yellow());
+    println!("  {} - Connect to Trezor hardware wallet", "connect [--path <derivation_path>]".yellow());
     println!("  {} - Show this help message", "help".yellow());
     println!("  {} - Exit interactive mode", "exit".yellow());
-} 
+}
+
+async fn handle_tx_command(safe: String, args: Vec<&str>, rpc_url: Option<String>) {
+    let mut hash: Option<String> = None;
+    let mut sign = false;
+    let mut derivation_path = "m/44'/60'/0'/0/0".to_string();
+    let mut tx_pool: Option<String> = None;
+
+    // Simple argument parsing
+    let mut i = 0;
+    while i < args.len() {
+        match args[i] {
+            "--hash" | "-t" => {
+                if i + 1 < args.len() {
+                    hash = Some(args[i + 1].to_string());
+                    i += 1;
+                }
+            },
+            "--sign" => {
+                sign = true;
+            },
+            "--path" => {
+                if i + 1 < args.len() {
+                    derivation_path = args[i + 1].to_string();
+                    i += 1;
+                }
+            },
+            "--tx-pool" => {
+                if i + 1 < args.len() {
+                    tx_pool = Some(args[i + 1].to_string());
+                    i += 1;
+                }
+            },
+            _ => {}
+        }
+        i += 1;
+    }
+
+    // Execute the tx command
+    if let Err(e) = crate::commands::tx::execute(
+        Some(safe),
+        rpc_url,
+        hash,
+        tx_pool,
+        sign,
+        derivation_path
+    ).await {
+        println!("{}: {}", "Error".red(), e);
+    }
+}
+
+async fn handle_connect_command(safe: String, args: Vec<&str>) {
+    let mut derivation_path = "m/44'/60'/0'/0/0".to_string();
+
+    // Simple argument parsing
+    let mut i = 1; // Skip "connect"
+    while i < args.len() {
+        match args[i] {
+            "--path" => {
+                if i + 1 < args.len() {
+                    derivation_path = args[i + 1].to_string();
+                    i += 1;
+                }
+            },
+            _ => {}
+        }
+        i += 1;
+    }
+
+    // Execute the connect command
+    if let Err(e) = crate::commands::connect::execute(Some(safe), derivation_path).await {
+        println!("{}: {}", "Error".red(), e);
+    }
+}
