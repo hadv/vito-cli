@@ -237,7 +237,18 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from(vec![Span::raw("  • 'connect trezor' - Connect hardware wallet")]),
         Line::from(vec![Span::raw("  • 'refresh data' - Update all data")]),
         Line::from(vec![Span::raw("  • 'sign transaction' - Sign selected transaction")]),
-        Line::from(vec![Span::raw("  • 'help' - Show this help")]),
+        Line::from(vec![Span::raw("  • 'status' - Show system status")]),
+        Line::from(""),
+        Line::from(vec![Span::styled("Quick Aliases:", Style::default().fg(Color::Magenta))]),
+        Line::from(vec![Span::raw("  • 'tx', 'ls' → show transactions")]),
+        Line::from(vec![Span::raw("  • 'conn' → connect trezor")]),
+        Line::from(vec![Span::raw("  • 'ref' → refresh data")]),
+        Line::from(vec![Span::raw("  • 's', 'sign' → sign transaction")]),
+        Line::from(""),
+        Line::from(vec![Span::styled("Alias Management:", Style::default().fg(Color::Magenta))]),
+        Line::from(vec![Span::raw("  • 'alias list' - Show all aliases")]),
+        Line::from(vec![Span::raw("  • 'alias add <name> <cmd>' - Create alias")]),
+        Line::from(vec![Span::raw("  • 'alias remove <name>' - Delete alias")]),
         Line::from(""),
         Line::from(vec![Span::styled("q/Esc", Style::default().fg(Color::Red)), Span::raw(" - Quit")]),
         Line::from(vec![Span::styled("Ctrl+C", Style::default().fg(Color::Red)), Span::raw(" - Force Quit")]),
@@ -328,22 +339,42 @@ fn draw_command_input(f: &mut Frame, area: Rect, app: &App) {
             .style(Style::default().fg(Color::Cyan));
         f.render_widget(suggestions_list, chunks[1]);
     } else {
-        // Show command examples when no suggestions
+        // Show command examples and aliases when no suggestions
         let examples = vec![
-            "show transactions - Display transaction list",
-            "connect trezor - Connect hardware wallet",
-            "refresh data - Update all data",
-            "sign transaction - Sign selected transaction",
-            "help - Show help information",
+            "Natural Language Commands:",
+            "  show transactions - Display transaction list",
+            "  connect trezor - Connect hardware wallet",
+            "  refresh data - Update all data",
+            "  sign transaction - Sign selected transaction",
+            "  status - Show system status",
+            "",
+            "Quick Aliases:",
+            "  tx, ls - show transactions",
+            "  conn - connect trezor",
+            "  ref - refresh data",
+            "  s, sign - sign transaction",
+            "",
+            "Alias Management:",
+            "  alias list - Show all aliases",
+            "  alias add <name> <command> - Create alias",
+            "  alias remove <name> - Delete alias",
         ];
 
         let example_items: Vec<ListItem> = examples
             .iter()
-            .map(|example| ListItem::new(*example))
+            .map(|example| {
+                if example.starts_with("  ") {
+                    ListItem::new(*example).style(Style::default().fg(Color::Cyan))
+                } else if example.is_empty() {
+                    ListItem::new("")
+                } else {
+                    ListItem::new(*example).style(Style::default().fg(Color::Yellow))
+                }
+            })
             .collect();
 
         let examples_list = List::new(example_items)
-            .block(Block::default().borders(Borders::ALL).title("Command Examples"))
+            .block(Block::default().borders(Borders::ALL).title("Commands & Aliases"))
             .style(Style::default().fg(Color::Gray));
         f.render_widget(examples_list, chunks[1]);
     }

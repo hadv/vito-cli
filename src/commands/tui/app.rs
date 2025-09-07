@@ -32,16 +32,36 @@ pub struct CommandInput {
     pub suggestions: Vec<String>,
     pub history: Vec<String>,
     pub history_index: Option<usize>,
+    pub aliases: std::collections::HashMap<String, String>,
 }
 
 impl CommandInput {
     pub fn new() -> Self {
+        let mut aliases = std::collections::HashMap::new();
+
+        // Default aliases
+        aliases.insert("tx".to_string(), "show transactions".to_string());
+        aliases.insert("ls".to_string(), "show transactions".to_string());
+        aliases.insert("list".to_string(), "show transactions".to_string());
+        aliases.insert("conn".to_string(), "connect trezor".to_string());
+        aliases.insert("connect".to_string(), "connect trezor".to_string());
+        aliases.insert("ref".to_string(), "refresh data".to_string());
+        aliases.insert("reload".to_string(), "refresh data".to_string());
+        aliases.insert("sign".to_string(), "sign transaction".to_string());
+        aliases.insert("s".to_string(), "sign transaction".to_string());
+        aliases.insert("home".to_string(), "dashboard".to_string());
+        aliases.insert("main".to_string(), "dashboard".to_string());
+        aliases.insert("exit".to_string(), "quit".to_string());
+        aliases.insert("q".to_string(), "quit".to_string());
+        aliases.insert("?".to_string(), "help".to_string());
+
         Self {
             input: String::new(),
             cursor_position: 0,
             suggestions: Vec::new(),
             history: Vec::new(),
             history_index: None,
+            aliases,
         }
     }
 
@@ -79,12 +99,32 @@ impl CommandInput {
     }
 
     pub fn submit(&mut self) -> String {
-        let command = self.input.clone();
+        let mut command = self.input.clone();
+
+        // Check for aliases first
+        if let Some(expanded) = self.aliases.get(&command.trim().to_lowercase()) {
+            command = expanded.clone();
+        }
+
         if !command.trim().is_empty() {
             self.history.push(command.clone());
         }
         self.clear();
         command
+    }
+
+    pub fn add_alias(&mut self, alias: String, command: String) {
+        self.aliases.insert(alias.to_lowercase(), command);
+    }
+
+    pub fn remove_alias(&mut self, alias: &str) {
+        self.aliases.remove(&alias.to_lowercase());
+    }
+
+    pub fn list_aliases(&self) -> Vec<(String, String)> {
+        self.aliases.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     pub fn history_up(&mut self) {
@@ -130,21 +170,81 @@ impl CommandInput {
         let input_lower = self.input.to_lowercase();
         let mut suggestions = Vec::new();
 
-        // Command suggestions based on input
+        // Extended command suggestions with more natural language patterns
         let commands = [
+            // Transaction commands
             ("show transactions", "Display all pending transactions"),
-            ("connect trezor", "Connect to Trezor hardware wallet"),
-            ("refresh data", "Refresh all data from the blockchain"),
-            ("sign transaction", "Sign the selected transaction"),
-            ("help", "Show help information"),
-            ("quit", "Exit the application"),
-            ("dashboard", "Go to dashboard view"),
             ("list transactions", "Show transaction list"),
+            ("view transactions", "Browse transaction history"),
+            ("get transactions", "Fetch transaction data"),
+            ("display transactions", "Show transaction details"),
+            ("transactions", "Go to transaction view"),
+
+            // Connection commands
+            ("connect trezor", "Connect to Trezor hardware wallet"),
+            ("connect wallet", "Connect hardware wallet"),
+            ("connect device", "Connect to hardware device"),
+            ("setup trezor", "Initialize Trezor connection"),
+            ("link trezor", "Establish Trezor connection"),
+
+            // Data refresh commands
+            ("refresh data", "Refresh all data from the blockchain"),
+            ("update data", "Update blockchain information"),
+            ("reload data", "Reload all information"),
+            ("sync data", "Synchronize with blockchain"),
+            ("fetch latest", "Get latest blockchain data"),
+
+            // Transaction signing
+            ("sign transaction", "Sign the selected transaction"),
+            ("sign tx", "Sign current transaction"),
+            ("approve transaction", "Approve and sign transaction"),
+            ("confirm transaction", "Confirm transaction signing"),
+
+            // Navigation commands
+            ("dashboard", "Go to dashboard view"),
+            ("home", "Return to main dashboard"),
+            ("main menu", "Go to main interface"),
+            ("overview", "Show dashboard overview"),
+
+            // Help and info
+            ("help", "Show help information"),
+            ("info", "Display application information"),
+            ("guide", "Show user guide"),
+            ("commands", "List available commands"),
+            ("shortcuts", "Show keyboard shortcuts"),
+
+            // Exit commands
+            ("quit", "Exit the application"),
+            ("exit", "Close the application"),
+            ("close", "Terminate the program"),
+            ("bye", "Exit gracefully"),
+
+            // Status commands
+            ("status", "Show current status"),
+            ("check status", "Display connection status"),
+            ("health check", "Verify system health"),
         ];
 
+        // Check full commands
         for (cmd, desc) in commands.iter() {
             if cmd.starts_with(&input_lower) {
                 suggestions.push(format!("{} - {}", cmd, desc));
+            }
+        }
+
+        // Check aliases
+        for (alias, full_cmd) in self.aliases.iter() {
+            if alias.starts_with(&input_lower) {
+                suggestions.push(format!("{} → {} (alias)", alias, full_cmd));
+            }
+        }
+
+        // Fuzzy matching for partial words
+        if suggestions.is_empty() {
+            for (cmd, desc) in commands.iter() {
+                if cmd.contains(&input_lower) {
+                    suggestions.push(format!("{} - {} (fuzzy match)", cmd, desc));
+                }
             }
         }
 
@@ -409,23 +509,45 @@ impl App {
         let command_lower = command.to_lowercase();
         self.conversation_history.push(format!("> {}", command));
 
+        // Handle alias management commands first
+        if command_lower.starts_with("alias ") {
+            self.handle_alias_command(&command_lower).await;
+            return;
+        }
+
         match command_lower.as_str() {
-            cmd if cmd.contains("show") && cmd.contains("transaction") => {
+            // Transaction viewing commands (expanded patterns)
+            cmd if cmd.contains("show") && cmd.contains("transaction") ||
+                   cmd.contains("list") && cmd.contains("transaction") ||
+                   cmd.contains("view") && cmd.contains("transaction") ||
+                   cmd.contains("display") && cmd.contains("transaction") ||
+                   cmd.contains("get") && cmd.contains("transaction") ||
+                   cmd == "transactions" => {
                 self.state = AppState::TransactionList;
                 self.refresh_transactions().await;
                 self.conversation_history.push("📋 Showing transaction list".to_string());
                 self.status_message = "Switched to transaction list view".to_string();
             }
-            cmd if cmd.contains("connect") && cmd.contains("trezor") => {
+
+            // Connection commands (expanded patterns)
+            cmd if cmd.contains("connect") && (cmd.contains("trezor") || cmd.contains("wallet") || cmd.contains("device")) ||
+                   cmd.contains("setup") && cmd.contains("trezor") ||
+                   cmd.contains("link") && cmd.contains("trezor") => {
                 self.state = AppState::TrezorConnect;
                 self.conversation_history.push("🔗 Connecting to Trezor...".to_string());
                 self.status_message = "Attempting to connect to Trezor".to_string();
             }
-            cmd if cmd.contains("refresh") || cmd.contains("reload") => {
+
+            // Data refresh commands (expanded patterns)
+            cmd if cmd.contains("refresh") || cmd.contains("reload") || cmd.contains("update") ||
+                   cmd.contains("sync") || cmd.contains("fetch") => {
                 self.refresh_data().await;
                 self.conversation_history.push("🔄 Data refreshed".to_string());
             }
-            cmd if cmd.contains("sign") && cmd.contains("transaction") => {
+
+            // Transaction signing commands (expanded patterns)
+            cmd if (cmd.contains("sign") || cmd.contains("approve") || cmd.contains("confirm")) &&
+                   (cmd.contains("transaction") || cmd.contains("tx")) => {
                 if !self.transactions.is_empty() {
                     self.confirmation_dialog = Some(ConfirmationDialog::new(
                         "Do you want to sign the selected transaction?".to_string()
@@ -436,28 +558,90 @@ impl App {
                     self.status_message = "No transactions available".to_string();
                 }
             }
-            cmd if cmd.contains("help") => {
+
+            // Help commands (expanded patterns)
+            cmd if cmd.contains("help") || cmd.contains("info") || cmd.contains("guide") ||
+                   cmd.contains("commands") || cmd.contains("shortcuts") => {
                 self.state = AppState::Help;
                 self.conversation_history.push("❓ Showing help".to_string());
                 self.status_message = "Help view activated".to_string();
             }
-            cmd if cmd.contains("dashboard") || cmd.contains("home") => {
+
+            // Navigation commands (expanded patterns)
+            cmd if cmd.contains("dashboard") || cmd.contains("home") || cmd.contains("main") ||
+                   cmd.contains("overview") => {
                 self.state = AppState::Dashboard;
                 self.conversation_history.push("🏠 Returning to dashboard".to_string());
                 self.status_message = "Dashboard view activated".to_string();
             }
-            cmd if cmd.contains("quit") || cmd.contains("exit") => {
+
+            // Status commands (new)
+            cmd if cmd.contains("status") || cmd.contains("health") => {
+                self.show_status_info().await;
+            }
+
+            // Exit commands (expanded patterns)
+            cmd if cmd.contains("quit") || cmd.contains("exit") || cmd.contains("close") ||
+                   cmd.contains("bye") => {
                 self.confirmation_dialog = Some(ConfirmationDialog::new(
                     "Are you sure you want to quit?".to_string()
                 ));
                 self.conversation_history.push("⚠️  Requesting confirmation to quit".to_string());
             }
+
             _ => {
-                self.conversation_history.push(format!("❓ Unknown command: '{}'. Try 'help' for available commands.", command));
+                self.conversation_history.push(format!("❓ Unknown command: '{}'. Try 'help' for available commands or 'alias list' to see shortcuts.", command));
                 self.status_message = format!("Unknown command: '{}'", command);
             }
         }
         self.update_contextual_help();
+    }
+
+    async fn handle_alias_command(&mut self, command: &str) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+
+        match parts.as_slice() {
+            ["alias", "list"] => {
+                let aliases = self.command_input.list_aliases();
+                if aliases.is_empty() {
+                    self.conversation_history.push("📝 No custom aliases defined".to_string());
+                } else {
+                    self.conversation_history.push("📝 Available aliases:".to_string());
+                    for (alias, cmd) in aliases.iter().take(5) {
+                        self.conversation_history.push(format!("  {} → {}", alias, cmd));
+                    }
+                }
+                self.status_message = format!("Listed {} aliases", aliases.len());
+            }
+            ["alias", "add", alias, command @ ..] if !alias.is_empty() && !command.is_empty() => {
+                let full_command = command.join(" ");
+                self.command_input.add_alias(alias.to_string(), full_command.clone());
+                self.conversation_history.push(format!("✅ Added alias: {} → {}", alias, full_command));
+                self.status_message = format!("Added alias '{}'", alias);
+            }
+            ["alias", "remove", alias] if !alias.is_empty() => {
+                self.command_input.remove_alias(alias);
+                self.conversation_history.push(format!("🗑️  Removed alias: {}", alias));
+                self.status_message = format!("Removed alias '{}'", alias);
+            }
+            _ => {
+                self.conversation_history.push("❓ Alias usage: 'alias list', 'alias add <name> <command>', 'alias remove <name>'".to_string());
+                self.status_message = "Invalid alias command syntax".to_string();
+            }
+        }
+    }
+
+    async fn show_status_info(&mut self) {
+        let safe_status = if self.safe_address.is_some() { "Connected" } else { "Not Connected" };
+        let trezor_status = if self.trezor_connected { "Connected" } else { "Not Connected" };
+        let tx_count = self.transactions.len();
+
+        self.conversation_history.push("📊 System Status:".to_string());
+        self.conversation_history.push(format!("  Safe: {}", safe_status));
+        self.conversation_history.push(format!("  Trezor: {}", trezor_status));
+        self.conversation_history.push(format!("  Transactions: {}", tx_count));
+
+        self.status_message = "Status information displayed".to_string();
     }
 
     async fn handle_confirmation_result(&mut self) {
@@ -514,8 +698,9 @@ impl App {
             }
             AppState::CommandInput => {
                 self.contextual_help = vec![
-                    "Type natural language commands".to_string(),
-                    "Examples: 'show transactions', 'connect trezor'".to_string(),
+                    "Type natural language commands or aliases".to_string(),
+                    "Examples: 'show transactions', 'tx', 'conn'".to_string(),
+                    "Alias commands: 'alias list', 'alias add'".to_string(),
                     "Use ↑/↓ for command history".to_string(),
                     "Press Enter to execute, Esc to cancel".to_string(),
                 ];
